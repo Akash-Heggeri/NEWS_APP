@@ -4,6 +4,7 @@ import 'package:news_app/item.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:news_app/news_api_key.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -52,30 +53,54 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> fetchData() async {
-    const url =
-        'https://newsapi.org/v2/everything?q=tesla&from=2023-11-21&sortBy=publishedAt&apiKey=$newsIndiaApiKey';
+    SharedPreferences prefs = await SharedPreferences.getInstance();
 
-    try {
-      final response = await http.get(Uri.parse(url));
-      if (response.statusCode == 200) {
-        final jsonData = json.decode(response.body);
-        final List<dynamic> articleList = jsonData['articles'];
-        setState(() {
-          articles = articleList
-              .map(
-                (article) => Item(
-                  article['title'],
-                  article['content'],
-                  article['publishedAt'],
-                ),
-              )
-              .toList();
-        });
-      } else {
-        throw Exception('Failed to load data');
+    int lastCallTimestamp = prefs.getInt('lastCallTimestamp') ?? 0;
+    int apiCallCount = prefs.getInt('apiCallCount') ?? 0;
+
+    int currentTime = DateTime.now().millisecondsSinceEpoch;
+    int oneDayInMillis = 24 * 60 * 60 * 1000;
+    if (currentTime - lastCallTimestamp > oneDayInMillis) {
+      apiCallCount = 0;
+      lastCallTimestamp = currentTime;
+    }
+    if (apiCallCount < 100) {
+      DateTime currentDate = DateTime.now();
+      String formattedDate =
+          '${currentDate.year}-${currentDate.month.toString().padLeft(2, '0')}-${currentDate.day.toString().padLeft(2, '0')}';
+      String url =
+          'https://newsapi.org/v2/everything?q=tesla&from=2023-12-03&sortBy=$formattedDate&apiKey=$newsIndiaApiKey';
+      try {
+        final response = await http.get(Uri.parse(url));
+        if (response.statusCode == 200) {
+          final jsonData = json.decode(response.body);
+          final List<dynamic> articleList = jsonData['articles'];
+
+          final limitedArticles = articleList.take(10).toList();
+
+          setState(() {
+            articles = limitedArticles
+                .map(
+                  (article) => Item(
+                    article['title'],
+                    article['content'],
+                    article['publishedAt'],
+                  ),
+                )
+                .toList();
+          });
+          apiCallCount++;
+          lastCallTimestamp = currentTime;
+          prefs.setInt('lastCallTimestamp', lastCallTimestamp);
+          prefs.setInt('apiCallCount', apiCallCount);
+        } else {
+          throw Exception('Failed to load data: ${response.statusCode}');
+        }
+      } catch (e) {
+        throw Exception('Error fetching data: $e');
       }
-    } catch (e) {
-      throw e.toString();
+    } else {
+      throw Exception('API call limit reached for today');
     }
   }
 
